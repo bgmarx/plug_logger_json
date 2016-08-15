@@ -202,4 +202,58 @@ defmodule Plug.LoggerJSONTest do
       assert map["fastly_duration"] == 0
     end
   end
+
+  describe "500 error" do
+    test "logs the error" do
+      stacktrace = [{MyPlug, :index, 2,
+        [file: 'web/controllers/reaction_controller.ex', line: 53]},
+       {MyPlug, :action, 2,
+        [file: 'web/controllers/reaction_controller.ex', line: 1]},
+       {MyPlug, :phoenix_controller_pipeline, 2,
+        [file: 'web/controllers/reaction_controller.ex', line: 1]},
+       {MyPlug, :instrument, 4,
+        [file: 'lib/reactions/endpoint.ex', line: 1]},
+       {MyPlug, :dispatch, 2, [file: 'lib/phoenix/router.ex', line: 261]},
+       {MyPlug, :do_call, 2, [file: 'web/router.ex', line: 1]},
+       {MyPlug, :call, 2, [file: 'lib/plug/error_handler.ex', line: 64]},
+       {MyPlug, :phoenix_pipeline, 1,
+        [file: 'lib/reactions/endpoint.ex', line: 1]},
+       {MyPlug, :call, 2, [file: 'lib/reactions/endpoint.ex', line: 1]},
+       {Plug.Adapters.Cowboy.Handler, :upgrade, 4,
+        [file: 'lib/plug/adapters/cowboy/handler.ex', line: 15]},
+       {:cowboy_protocol, :execute, 4, [file: 'src/cowboy_protocol.erl', line: 442]}]
+
+      {conn, _} = conn(:get, "/")
+                  |> call
+
+      {_, message} = get_log(fn -> Plug.LoggerJSON.log_error(conn, :error, %RuntimeError{message: "ERROR"}, stacktrace) end)
+
+      message = String.replace(message, "\e[31m", "")
+      message = String.replace(message, "\e[22m", "")
+      message = String.replace(message, "\n\e[0m", "")
+      message = String.replace(message, "{\"status", ",{\"status")
+      message = String.replace(message, "{\"requ", "[{\"requ")
+      message = String.replace(message, "version\":\"N/A\"}", "version\":\"N/A\"}]")
+      map = Poison.decode! message
+      [error_log, http_log] = map
+
+      assert error_log["log_type"] == "error"
+      assert error_log["message"] == "** (RuntimeError) ERROR\n    web/controllers/reaction_controller.ex:53: Plug.LoggerJSONTest.MyPlug.index/2\n    web/controllers/reaction_controller.ex:1: Plug.LoggerJSONTest.MyPlug.action/2\n    web/controllers/reaction_controller.ex:1: Plug.LoggerJSONTest.MyPlug.phoenix_controller_pipeline/2\n    lib/reactions/endpoint.ex:1: Plug.LoggerJSONTest.MyPlug.instrument/4\n    lib/phoenix/router.ex:261: Plug.LoggerJSONTest.MyPlug.dispatch/2\n    web/router.ex:1: Plug.LoggerJSONTest.MyPlug.do_call/2\n    lib/plug/error_handler.ex:64: Plug.LoggerJSONTest.MyPlug.call/2\n    lib/reactions/endpoint.ex:1: Plug.LoggerJSONTest.MyPlug.phoenix_pipeline/1\n    lib/reactions/endpoint.ex:1: Plug.LoggerJSONTest.MyPlug.call/2\n    lib/plug/adapters/cowboy/handler.ex:15: Plug.Adapters.Cowboy.Handler.upgrade/4\n    src/cowboy_protocol.erl:442: :cowboy_protocol.execute/4\n"
+      assert error_log["request_id"] ==  nil
+
+      assert http_log["api_version"] == "N/A"
+      assert http_log["client_ip"] == "N/A"
+      assert http_log["client_version"] == "N/A"
+      assert http_log["date_time"]
+      assert http_log["duration"]
+      assert http_log["fastly_duration"] == -1
+      assert http_log["handler"] == "N/A"
+      assert http_log["log_type"] == "http"
+      assert http_log["method"] == "GET"
+      assert http_log["params"] == %{}
+      assert http_log["path"] == "/"
+      assert http_log["request_id"] == nil
+      assert http_log["status"] == "200"
+    end
+  end
 end
